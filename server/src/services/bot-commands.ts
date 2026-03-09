@@ -525,6 +525,8 @@ export interface OwnerMentionEvent {
   text: string;
   ts: string;
   threadTs?: string;
+  /** Optional — if provided, Opus posts a confirmation reply in the thread when a task is created. */
+  postReply?: (text: string) => Promise<void>;
 }
 
 export async function processOwnerMention(event: OwnerMentionEvent): Promise<void> {
@@ -571,6 +573,11 @@ export async function processOwnerMention(event: OwnerMentionEvent): Promise<voi
         });
 
         console.log(`[Bot] Owner mention grouped with task #${existing.id}: "${existing.title.slice(0, 50)}"`);
+
+        // Reply in thread — already tracked
+        await event.postReply?.(
+          `📌 Already tracked — linked to existing task: *${existing.title}*\n_Task #${existing.id} · Updated with this mention._`
+        );
         return;
       }
     }
@@ -604,6 +611,14 @@ export async function processOwnerMention(event: OwnerMentionEvent): Promise<voi
       is_read: 0,
       linked_task_id: task.id,
     });
+
+    const prioEmoji = priority === 'high' ? '🔴' : priority === 'low' ? '🟢' : '🟡';
+    const dueStr = due_date ? ` · due ${due_date}` : '';
+
+    // Reply in thread — task created
+    await event.postReply?.(
+      `✅ Task created: *${task.title}*${dueStr} ${prioEmoji}\n_#${task.id} · Tracked in the Opus dashboard._`
+    );
 
     console.log(`[Bot] Owner mention → new task #${task.id}: "${title.slice(0, 50)}"`);
   } else if (result.classification === 'mention' && result.mention) {

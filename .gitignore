@@ -18,12 +18,19 @@ data/
 *.swp
 *.swo
 
+# Claude Code local workspace files (machine-specific paths + permissions)
+.claude/
+
 # OS / editor
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# Local AI models (GGUF files are large — download via npm run download-model)
+models/
+*.gguf
 
 # Docker
 .dockerignore

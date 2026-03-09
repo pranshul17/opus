@@ -1,7 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+import { aiComplete } from './ai-provider';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +34,14 @@ export interface SlackMessage {
   user?: string;
   text: string;
   username?: string;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Strip markdown code fences and return the raw JSON string. */
+function stripCodeFence(text: string): string {
+  const m = text.match(/```(?:json)?\n?([\s\S]*?)\n?```/);
+  return m ? m[1] : text;
 }
 
 // ─── Parse channel messages ───────────────────────────────────────────────────
@@ -113,27 +119,19 @@ Return ONLY valid JSON with this exact structure:
 }`;
 
   try {
-    const stream = (client.messages as any).stream({
-      model: 'claude-opus-4-6',
-      max_tokens: 4096,
-      thinking: { type: 'adaptive' },
+    const raw = await aiComplete({
       system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
+      prompt: userPrompt,
+      maxTokens: 4096,
+      thinking: true, // enables extended thinking on Anthropic; ignored on other providers
     });
 
-    const response = await stream.finalMessage();
+    if (!raw.trim()) return { tasks: [], links: [], summary: 'Failed to parse channel content.' };
 
-    const textBlock = response.content.find((b: any) => b.type === 'text') as any;
-    if (!textBlock) return { tasks: [], links: [], summary: 'Failed to parse channel content.' };
-
-    let jsonText = (textBlock.text as string).trim();
-    const jsonMatch = jsonText.match(/```(?:json)?\n?([\s\S]*?)\n?```/);
-    if (jsonMatch) jsonText = jsonMatch[1];
-
-    const raw = JSON.parse(jsonText);
-    return ParsedChannelSchema.parse(raw);
+    const parsed = JSON.parse(stripCodeFence(raw.trim()));
+    return ParsedChannelSchema.parse(parsed);
   } catch (err) {
-    console.error('[Claude] Error parsing channel messages:', err);
+    console.error('[AI] Error parsing channel messages:', err);
     return { tasks: [], links: [], summary: 'Error during AI analysis.' };
   }
 }
@@ -178,28 +176,18 @@ Keep key_topics to max 5 items (short, 1-3 word phrases).
 Keep top_contributors to max 5 names (people who posted the most or most important messages).`;
 
   try {
-    const stream = client.messages.stream({
-      model: 'claude-opus-4-6',
-      max_tokens: 512,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    const raw = await aiComplete({ prompt, maxTokens: 512 });
 
-    const response = await stream.finalMessage();
-    const textBlock = response.content.find((b: any) => b.type === 'text') as any;
-    if (!textBlock) return { summary: 'Unable to generate summary.', key_topics: [], top_contributors: [] };
+    if (!raw.trim()) return { summary: 'Unable to generate summary.', key_topics: [], top_contributors: [] };
 
-    let jsonText = (textBlock.text as string).trim();
-    const jsonMatch = jsonText.match(/```(?:json)?\n?([\s\S]*?)\n?```/);
-    if (jsonMatch) jsonText = jsonMatch[1];
-
-    const raw = JSON.parse(jsonText);
+    const parsed = JSON.parse(stripCodeFence(raw.trim()));
     return {
-      summary: raw.summary ?? '',
-      key_topics: Array.isArray(raw.key_topics) ? raw.key_topics.slice(0, 5) : [],
-      top_contributors: Array.isArray(raw.top_contributors) ? raw.top_contributors.slice(0, 5) : [],
+      summary: parsed.summary ?? '',
+      key_topics: Array.isArray(parsed.key_topics) ? parsed.key_topics.slice(0, 5) : [],
+      top_contributors: Array.isArray(parsed.top_contributors) ? parsed.top_contributors.slice(0, 5) : [],
     };
   } catch (err) {
-    console.error('[Claude] Error generating channel summary:', err);
+    console.error('[AI] Error generating channel summary:', err);
     return { summary: 'Error generating summary.', key_topics: [], top_contributors: [] };
   }
 }
@@ -243,17 +231,10 @@ Format the digest as:
 Keep it brief and actionable. Use Slack's mrkdwn formatting.`;
 
   try {
-    const stream = client.messages.stream({
-      model: 'claude-opus-4-6',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const response = await stream.finalMessage();
-    const textBlock = response.content.find((b: any) => b.type === 'text') as any;
-    return textBlock ? (textBlock.text as string) : `*${channelName} Digest* — Unable to generate digest.`;
+    const text = await aiComplete({ prompt, maxTokens: 1024 });
+    return text || `*${channelName} Digest* — Unable to generate digest.`;
   } catch (err) {
-    console.error('[Claude] Error generating digest:', err);
+    console.error('[AI] Error generating digest:', err);
     return `*${channelName} Digest* — Error generating digest.`;
   }
 }
@@ -287,26 +268,19 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-opus-4-6',
-      max_tokens: 512,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    const raw = await aiComplete({ prompt, maxTokens: 512 });
 
-    const textBlock = response.content.find((b: any) => b.type === 'text') as any;
-    if (!textBlock) return { summary: 'Unable to summarize.', key_concepts: [] };
+    if (!raw.trim()) return { summary: 'Unable to summarize.', key_concepts: [] };
 
-    let jsonText = (textBlock.text as string).trim();
-    const jsonMatch = jsonText.match(/```(?:json)?\n?([\s\S]*?)\n?```/);
-    if (jsonMatch) jsonText = jsonMatch[1];
-
-    const raw = JSON.parse(jsonText);
+    const parsed = JSON.parse(stripCodeFence(raw.trim()));
     return {
-      summary: raw.summary || '',
-      key_concepts: Array.isArray(raw.key_concepts) ? raw.key_concepts.slice(0, 8).map((c: string) => c.toLowerCase().trim()) : [],
+      summary: parsed.summary || '',
+      key_concepts: Array.isArray(parsed.key_concepts)
+        ? parsed.key_concepts.slice(0, 8).map((c: string) => c.toLowerCase().trim())
+        : [],
     };
   } catch (err) {
-    console.error('[Claude] Error summarizing article:', err);
+    console.error('[AI] Error summarizing article:', err);
     return { summary: 'Error generating summary.', key_concepts: [] };
   }
 }
@@ -364,47 +338,38 @@ Return ONLY valid JSON — no markdown, no extra text:
 }`;
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-opus-4-6',
-      max_tokens: 400,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    const raw = await aiComplete({ prompt, maxTokens: 400 });
 
-    const textBlock = response.content.find((b: any) => b.type === 'text') as any;
-    if (!textBlock) return { classification: 'ignore' };
+    if (!raw.trim()) return { classification: 'ignore' };
 
-    let jsonText = (textBlock.text as string).trim();
-    const jsonMatch = jsonText.match(/```(?:json)?\n?([\s\S]*?)\n?```/);
-    if (jsonMatch) jsonText = jsonMatch[1];
+    const parsed = JSON.parse(stripCodeFence(raw.trim()));
+    const cls = parsed.classification as string;
 
-    const raw = JSON.parse(jsonText);
-    const cls = raw.classification as string;
-
-    if (cls === 'task' && raw.task) {
+    if (cls === 'task' && parsed.task) {
       return {
         classification: 'task',
         task: {
-          title: String(raw.task.title ?? '').slice(0, 200),
-          priority: (['high', 'medium', 'low'].includes(raw.task.priority) ? raw.task.priority : 'medium') as 'high' | 'medium' | 'low',
-          due_date: raw.task.due_date && /^\d{4}-\d{2}-\d{2}$/.test(raw.task.due_date) ? raw.task.due_date : null,
-          duplicate_task_id: raw.task.duplicate_task_id ? Number(raw.task.duplicate_task_id) : null,
+          title: String(parsed.task.title ?? '').slice(0, 200),
+          priority: (['high', 'medium', 'low'].includes(parsed.task.priority) ? parsed.task.priority : 'medium') as 'high' | 'medium' | 'low',
+          due_date: parsed.task.due_date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.task.due_date) ? parsed.task.due_date : null,
+          duplicate_task_id: parsed.task.duplicate_task_id ? Number(parsed.task.duplicate_task_id) : null,
         },
       };
     }
 
-    if (cls === 'mention' && raw.mention) {
+    if (cls === 'mention' && parsed.mention) {
       return {
         classification: 'mention',
         mention: {
-          summary: String(raw.mention.summary ?? '').slice(0, 300),
-          relevance: raw.mention.relevance === 'high' ? 'high' : 'medium',
+          summary: String(parsed.mention.summary ?? '').slice(0, 300),
+          relevance: parsed.mention.relevance === 'high' ? 'high' : 'medium',
         },
       };
     }
 
     return { classification: 'ignore' };
   } catch (err) {
-    console.error('[Claude] classifyMention error:', err);
+    console.error('[AI] classifyMention error:', err);
     // Fallback: treat as a plain mention rather than dropping it
     return {
       classification: 'mention',
