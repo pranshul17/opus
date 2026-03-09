@@ -7,8 +7,14 @@ services:
     environment:
       - NODE_ENV=production
     volumes:
-      # SQLite database persists across container restarts
-      - opus-data:/app/data
+      # Bind mounts — data lives on your host machine as plain files.
+      # Survives container crashes, restarts, rebuilds, and `docker compose down`.
+      # Back up with: cp data/opus.db data/opus.db.bak
+      - ./data:/app/data
+
+      # Local AI model files (only needed if AI_PROVIDER=local)
+      # Download with: cd server && npm run download-model
+      - ./models:/app/models
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
@@ -16,6 +22,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-volumes:
-  opus-data:

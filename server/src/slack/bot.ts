@@ -56,6 +56,14 @@ export function registerHandlers(app: App) {
         text: msg.text || '',
         ts: msg.ts,
         threadTs: msg.thread_ts,
+        // Reply in the original message's thread when a task is created
+        postReply: async (text) => {
+          await client.chat.postMessage({
+            channel: msg.channel,
+            thread_ts: msg.ts,
+            text,
+          });
+        },
       }).catch(err => console.error('[Bot] processOwnerMention error:', err));
     }
 
