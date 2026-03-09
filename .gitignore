@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+server/node_modules/
+client/node_modules/
+
+# Build outputs
+server/dist/
+client/dist/
+
+# Database (contains your data — back up separately)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Credentials — never commit these
+.env
+*.swp
+*.swo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Docker
+.dockerignore
